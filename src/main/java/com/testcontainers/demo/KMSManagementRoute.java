@@ -10,7 +10,7 @@ import software.amazon.awssdk.services.kms.model.*;
 
 import java.net.URI;
 
-@Component
+//@Component
 public class KMSManagementRoute extends RouteBuilder {
 
     private static final String url = "http://127.0.0.1:";
