@@ -12,6 +12,8 @@ import org.apache.kafka.clients.admin.NewTopic;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
@@ -25,9 +27,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Testcontainers
 class KafkaCamelRouteTest {
 
+    private static final Logger log = LoggerFactory.getLogger(KafkaCamelRouteTest.class);
     private static KafkaContainer kafkaContainer;
     private static String bootstrapServers;
-    private static final String topicName = "ryan-topic";
+    private static final String topicName = "example-topic";
 
     @BeforeAll
     public static void setup() throws ExecutionException, InterruptedException {
@@ -71,7 +74,7 @@ class KafkaCamelRouteTest {
         // Produce a message to Kafka
         Passenger passenger = Passenger.builder()
                 .firstName("Ryan Truong")
-                .age(37)
+                .age(34)
                 .gender(true)
                 .build();
 
@@ -82,14 +85,14 @@ class KafkaCamelRouteTest {
         consumerTemplate.start();
 
         //String message = consumerTemplate.receiveBody("kafka:" + topicName + "?brokers=" + bootstrapServers, String.class);
-        Passenger message = consumerTemplate.receiveBody("direct:result", 5000, Passenger.class);
+        Passenger messPassenger = consumerTemplate.receiveBody("direct:result", 5000, Passenger.class);
+        log.info("Message of passenger:{}", messPassenger);
         consumerTemplate.stop();
 
         // Assert that the message is received
-        assertThat(message).isNotNull();
-        assert message.getFirstName().equals("Ryan Truong");
-        //assert message.getFirstName().equals("Ryan Truong");
-        //assert message.getFirstName().equals("Ryan Truong");
+        assertThat(messPassenger).isNotNull();
+        assertThat(messPassenger.getFirstName()).isEqualTo("Ryan Truong");
+        assertThat(messPassenger.getAge()).isEqualTo(34);
 
         camelContext.stop();
     }
