@@ -1,110 +1,88 @@
 package com.testcontainers.demo;
-
 import com.testcontainers.demo.dto.Passenger;
 import org.apache.camel.CamelContext;
+import org.apache.camel.Endpoint;
+import org.apache.camel.EndpointInject;
+import org.apache.camel.ProducerTemplate;
 import org.apache.camel.builder.RouteBuilder;
-import org.apache.camel.impl.DefaultCamelContext;
-import org.apache.camel.impl.engine.DefaultConsumerTemplate;
-import org.apache.camel.model.dataformat.JsonLibrary;
-import org.apache.kafka.clients.admin.AdminClient;
-import org.apache.kafka.clients.admin.AdminClientConfig;
-import org.apache.kafka.clients.admin.NewTopic;
+import org.apache.camel.component.mock.MockEndpoint;
+import org.apache.camel.test.junit5.CamelTestSupport;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.KafkaContainer;
-import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
-import java.util.Collections;
-import java.util.Properties;
-import java.util.concurrent.ExecutionException;
 
-import static org.assertj.core.api.Assertions.assertThat;
-
-@Testcontainers
-class KafkaCamelRouteTest {
+class KafkaCamelRouteTest extends CamelTestSupport {
 
     private static final Logger log = LoggerFactory.getLogger(KafkaCamelRouteTest.class);
     private static KafkaContainer kafkaContainer;
-    private static String bootstrapServers;
-    private static final String topicName = "example-topic";
+
+    @EndpointInject("mock:result")
+    private MockEndpoint mockResult;
 
     @BeforeAll
-    public static void setup() throws ExecutionException, InterruptedException {
+    public static void startKafkaContainer() {
         kafkaContainer = new KafkaContainer(
-                DockerImageName.parse("confluentinc/cp-kafka:7.2.1")
-        ).withExposedPorts(9093); // Expose Kafka port
-
+            DockerImageName.parse("confluentinc/cp-kafka:7.2.1")
+        );
         kafkaContainer.start();
-        bootstrapServers = kafkaContainer.getBootstrapServers();
-
-        createKafkaTopic(topicName, 1, (short) 1);
     }
 
     @AfterAll
-    public static void tearDown() {
-        kafkaContainer.stop();
+    public static void stopKafkaContainer() {
+        if (kafkaContainer != null) {
+            kafkaContainer.stop();
+        }
+    }
+
+    @Override
+    protected CamelContext createCamelContext() throws Exception {
+        CamelContext context = super.createCamelContext();
+        String kafkaBrokerAddress = kafkaContainer.getBootstrapServers();
+        String kafkaUri = "kafka:test-topic?brokers=" + kafkaBrokerAddress;
+        Endpoint endpoint = context.getEndpoint(kafkaUri);
+        context.addEndpoint("kafka:test-topic", endpoint);
+
+        return context;
+    }
+
+    @Override
+    protected RouteBuilder createRouteBuilder() {
+        return new KafkaCamelRoute(kafkaContainer.getBootstrapServers());
     }
 
     @Test
     public void testKafkaCamelIntegration() throws Exception {
-        CamelContext camelContext = new DefaultCamelContext();
-        camelContext.addRoutes(new RouteBuilder() {
-            @Override
-            public void configure() throws Exception {
-
-                // Route to produce messages to Kafka
-                from("direct:start")
-                        .marshal().json(JsonLibrary.Jackson)
-                        .to("kafka:" + topicName + "?brokers=" + bootstrapServers);
-
-                // Route to consume messages from Kafka
-                from("kafka:" + topicName + "?brokers=" + bootstrapServers + "&autoOffsetReset=earliest&groupId=test-group")
-                        .unmarshal().json(JsonLibrary.Jackson, Passenger.class)
-                        .log("Received message from Kafka: ${body}")
-                        .to("direct:result");
-            }
-        });
-
-        camelContext.start();
-
-        // Produce a message to Kafka
-        Passenger passenger = Passenger.builder()
-                .firstName("Ryan Truong")
-                .age(34)
+        CamelContext context = context();
+        context.start();
+        try {
+            // given
+            Passenger passenger = Passenger.builder()
+                .firstName("Test ABC")
+                .age(37)
                 .gender(true)
                 .build();
 
-        camelContext.createProducerTemplate().sendBody("direct:start", passenger);
+            // expect the mock endpoint to receive the message
+            mockResult.expectedMessageCount(1);
+            mockResult.expectedBodiesReceived(passenger);
 
-        // Consume the message from Kafka
-        DefaultConsumerTemplate consumerTemplate = new DefaultConsumerTemplate(camelContext);
-        consumerTemplate.start();
+            // when
+            ProducerTemplate producerTemplate = context.createProducerTemplate();
+            producerTemplate.sendBody("direct:start", passenger);
 
-        //String message = consumerTemplate.receiveBody("kafka:" + topicName + "?brokers=" + bootstrapServers, String.class);
-        Passenger messPassenger = consumerTemplate.receiveBody("direct:result", 5000, Passenger.class);
-        log.info("Message of passenger:{}", messPassenger);
-        consumerTemplate.stop();
+            // then
+            mockResult.assertIsSatisfied();
 
-        // Assert that the message is received
-        assertThat(messPassenger).isNotNull();
-        assertThat(messPassenger.getFirstName()).isEqualTo("Ryan Truong");
-        assertThat(messPassenger.getAge()).isEqualTo(34);
+            Passenger messPassenger = mockResult.getReceivedExchanges().get(0).getIn().getBody(Passenger.class);
+            log.info("Message of passenger {}", messPassenger);
 
-        camelContext.stop();
-    }
-
-    private static void createKafkaTopic(String topicName, int numPartitions, int replicationFactor)
-            throws ExecutionException, InterruptedException {
-        Properties properties = new Properties();
-        properties.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-
-        try (AdminClient adminClient = AdminClient.create(properties)) {
-            NewTopic newTopic = new NewTopic(topicName, numPartitions, (short) replicationFactor);
-            adminClient.createTopics(Collections.singletonList(newTopic)).all().get();
+        } finally {
+            context.stop();
         }
     }
 }

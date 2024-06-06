@@ -18,7 +18,6 @@ import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.kms.KmsClient;
 import software.amazon.awssdk.services.kms.model.*;
 
-@SpringBootTest
 @Testcontainers
 class KMSManagementRouteTest {
 
